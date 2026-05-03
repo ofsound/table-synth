@@ -1,0 +1,39 @@
+{
+  "name": "table-synth",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite --host 0.0.0.0",
+    "dev:companion": "tsx src/companion/server.ts",
+    "certs": "node scripts/generate-certs.mjs",
+    "build": "tsc -b && vite build",
+    "preview": "vite preview --host 0.0.0.0",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "verify": "npm run test && npm run build"
+  },
+  "dependencies": {
+    "@vitejs/plugin-basic-ssl": "^2.0.0",
+    "easymidi": "^3.1.0",
+    "lucide-react": "^1.14.0",
+    "matter-js": "^0.20.0",
+    "node-forge": "^1.4.0",
+    "react": "^19.1.0",
+    "react-dom": "^19.1.0",
+    "selfsigned": "^2.4.1",
+    "ws": "^8.18.0"
+  },
+  "devDependencies": {
+    "@types/matter-js": "^0.19.8",
+    "@types/node": "^22.15.3",
+    "@types/react": "^19.1.2",
+    "@types/react-dom": "^19.1.2",
+    "@types/ws": "^8.5.13",
+    "@vitejs/plugin-react": "^4.4.1",
+    "tsx": "^4.19.4",
+    "typescript": "^5.8.3",
+    "vite": "^6.3.4",
+    "vitest": "^3.1.2"
+  }
+}
