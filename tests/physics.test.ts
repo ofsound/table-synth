@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { getCellAtPosition } from "../src/shared/grid";
+import { getCellAtPosition, headingToColumnOffset, visibleColToGridCol } from "../src/shared/grid";
 import { applyCalibration, normalizeSpeed, orientationToTilt, smoothTilt, TriggerTracker } from "../src/shared/physics";
 import { speedToVelocity } from "../src/shared/music";
 
@@ -21,6 +21,14 @@ describe("physics helpers", () => {
     expect(getCellAtPosition(0.01, 0.01)).toEqual({ row: 0, col: 0 });
     expect(getCellAtPosition(0.999, 0.999)).toEqual({ row: 7, col: 7 });
     expect(getCellAtPosition(-0.1, 0.5)).toBeNull();
+  });
+
+  it("maps compass heading to the 64-column wrapped viewport", () => {
+    expect(headingToColumnOffset(null)).toBe(0);
+    expect(headingToColumnOffset(0)).toBe(0);
+    expect(headingToColumnOffset(359.9)).toBe(63);
+    expect(headingToColumnOffset(360)).toBe(0);
+    expect(visibleColToGridCol(7, 60)).toBe(3);
   });
 
   it("turns speed into MIDI velocity", () => {

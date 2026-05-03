@@ -10,6 +10,10 @@ type DeviceMotionEventWithPermission = typeof DeviceMotionEvent & {
   requestPermission?: () => Promise<"granted" | "denied">;
 };
 
+type DeviceOrientationEventWithCompass = DeviceOrientationEvent & {
+  webkitCompassHeading?: number;
+};
+
 export type ControlMode = "sensor" | "simulation";
 export type PermissionState = "idle" | "granted" | "denied" | "unsupported";
 
@@ -20,6 +24,7 @@ export function useTiltControls() {
   const [mode, setMode] = useState<ControlMode>("simulation");
   const [permission, setPermission] = useState<PermissionState>("idle");
   const [sensorActive, setSensorActive] = useState(false);
+  const [heading, setHeading] = useState<number | null>(null);
   const neutralRef = useRef<TiltVector>(ZERO);
   const rawSensorRef = useRef<TiltVector>(ZERO);
   const smoothedRef = useRef<TiltVector>(ZERO);
@@ -67,13 +72,19 @@ export function useTiltControls() {
       return undefined;
     }
 
-    const handleOrientation = (event: DeviceOrientationEvent) => {
+    const handleOrientation = (event: DeviceOrientationEventWithCompass) => {
       const raw = orientationToTilt({ beta: event.beta, gamma: event.gamma });
       rawSensorRef.current = raw;
       const calibrated = applyCalibration(raw, neutralRef.current);
       const next = smoothTilt(smoothedRef.current, calibrated);
       smoothedRef.current = next;
       setTilt(next);
+
+      if (typeof event.webkitCompassHeading === "number") {
+        setHeading(event.webkitCompassHeading);
+      } else if (typeof event.alpha === "number") {
+        setHeading(360 - event.alpha);
+      }
     };
 
     window.addEventListener("deviceorientation", handleOrientation);
@@ -136,6 +147,7 @@ export function useTiltControls() {
 
   return {
     tilt,
+    heading,
     mode,
     setMode,
     permission,

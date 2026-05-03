@@ -1,0 +1,12 @@
+---
+description: Run tests and production build after code edits; fix issues before finishing
+alwaysApply: true
+---
+
+# Post-edit verification
+
+[AGENTS.md](AGENTS.md) is the workflow source of truth.
+
+After substantive edits, run **`npm run verify`** (**`vitest run`**, then **`npm run build`**: `tsc -b` + `vite build`) and fix any failures before finishing.
+
+Vitest is configured in [vite.config.ts](vite.config.ts) (`test`); specs live under [tests/](tests/).

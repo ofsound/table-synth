@@ -1,0 +1,22 @@
+---
+description: React patterns, Canvas, and Matter.js simulation loop
+globs: "**/*.{tsx,ts}"
+alwaysApply: false
+---
+
+# React and simulation
+
+## React
+
+- Prefer **function components** with hooks. Most feature code lives in [src/App.tsx](src/App.tsx); when adding substantial UI or behavior, **extract** components or hooks under `src/` instead of inflating `App.tsx` without reason.
+- Keep **local state** in the component that owns the UX unless you introduce a deliberate shared layer.
+
+## Canvas and Matter.js
+
+- The app uses **CanvasRenderingContext2D** for the table and **Matter.Engine** for the ball. Typical patterns: **`useRef`** for the canvas element, engine, ball body, and animation frame id; **`useEffect`** for setup/teardown (cancel rAF, clear Matter events, destroy engine as the codebase already does).
+- Use **`useMemo`** / **`useCallback`** for stable handlers and derived values (grid dimensions, bridge URL helpers) to avoid unnecessary effect re-runs.
+- Do not introduce **React Three Fiber** or **three** for this view — the stack is 2D canvas + Matter only.
+
+## Testing
+
+- **Vitest** runs in Node (`environment: "node"` in [vite.config.ts](vite.config.ts)). Pure logic tests live under [tests/](tests/). After changing `shared/` or `companion/` message handling, run **`npm run verify`**.

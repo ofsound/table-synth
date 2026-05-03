@@ -1,0 +1,13 @@
+---
+description: Global CSS variables and UI conventions (no Tailwind)
+globs: "**/*.{tsx,css}"
+alwaysApply: false
+---
+
+# CSS and UI
+
+- Prefer **classes and variables** in [src/styles.css](src/styles.css) over large inline `style={{}}` blocks for layout chrome (panels, buttons, inputs). Reuse existing tokens: `--panel`, `--panel-2`, `--line`, `--text-muted`, `--accent`, `--accent-2`.
+- The **table surface** is drawn with **Canvas 2D** in [src/App.tsx](src/App.tsx) (`drawTable`, etc.). Hex and rgba values there are intentional for the playfield; keep canvas colors readable against the dark UI.
+- When adding new recurring colors, prefer **extending `:root`** in `styles.css` with a named variable rather than scattering one-off hex in JSX.
+- Prefer semantic elements (`button`, `input`, `label`). If a non-interactive element is made clickable, add **`role="button"`** and keyboard support where the app already does for similar controls.
+- Avoid `space-y-*` / Tailwind-style utility thinking — this project uses **plain CSS** (flex/grid, `gap`, margins in `styles.css`).

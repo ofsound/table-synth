@@ -19,7 +19,7 @@ describe("MIDI message conversion", () => {
   });
 
   it("creates note on and fixed-delay note off messages", () => {
-    const messages = hitToMidiMessages(hit, { midiChannel: 1, noteDurationMs: 160 });
+    const messages = hitToMidiMessages({ ...hit, col: 63 }, { midiChannel: 1, noteDurationMs: 160 });
     expect(messages.noteOn).toEqual({ note: 60, velocity: 100, channel: 0 });
     expect(messages.noteOff).toEqual({ note: 60, velocity: 0, channel: 0 });
     expect(messages.noteDurationMs).toBe(160);
@@ -29,6 +29,7 @@ describe("MIDI message conversion", () => {
     expect(validateHit({ ...hit, note: 128 })).toContain("note");
     expect(validateHit({ ...hit, velocity: 0 })).toContain("velocity");
     expect(validateHit({ ...hit, row: 8 })).toContain("row");
+    expect(validateHit({ ...hit, col: 64 })).toContain("col");
     expect(validateHit({ ...hit, speed: 1.2 })).toContain("speed");
   });
 });

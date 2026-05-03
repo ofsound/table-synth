@@ -1,0 +1,28 @@
+---
+description: Core stack and conventions (React, Vite, Matter.js, Canvas, companion)
+alwaysApply: true
+---
+
+# Project context
+
+- **Stack:** React 19, Vite 6, TypeScript, **Matter.js**, **Canvas 2D**, **lucide-react**, **WebSocket** + **OSC** (browser), optional **Node** companion (**ws**, **easymidi**, **tsx**). **Vitest** for tests. No Tailwind, ESLint, Three.js, or path aliases unless added later.
+
+## Styling
+
+- Global layout and tokens live in [src/styles.css](src/styles.css) (CSS variables such as `--panel`, `--accent`, `--text-muted`). UI chrome uses plain CSS classes; the table itself is drawn on a **canvas** in [src/App.tsx](src/App.tsx).
+
+## Imports
+
+- Use **relative** imports from each file (`../shared/...`, `./hooks/...`). There is no `@/*` alias in tsconfig today.
+
+## Import order
+
+When adding or editing imports in `src/**/*.ts` or `src/**/*.tsx`, use **one blank line between groups**; no blank line within a group.
+
+1. **React** — `react`, `react-dom`, `react/*`
+2. **External packages** — e.g. `matter-js`, `lucide-react`
+3. **Relative** — `./...`, `../...` (hooks, shared, companion)
+
+**`import type`:** group type-only imports last when it improves clarity.
+
+If a module supplies both types and values, one import line is fine; place it by primary use. Keep order readable and consistent with surrounding files.

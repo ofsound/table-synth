@@ -1,0 +1,13 @@
+---
+description: Node WebSocket + MIDI companion (tsx, ws, easymidi)
+globs: src/companion/**/*
+alwaysApply: false
+---
+
+# Companion server
+
+- **Entry:** `npm run dev:companion` runs [src/companion/server.ts](src/companion/server.ts) with **tsx** (Node ESM). Run it alongside **`npm run dev`** when testing end-to-end MIDI output.
+- **Transport:** **HTTPS** server + **WebSocketServer** from **ws**. TLS material comes from [src/companion/certs.ts](src/companion/certs.ts) (env vars or generated/fallback paths — read that module before changing cert behavior).
+- **Protocol:** Incoming messages are **OSC bytes**; decode with [src/shared/osc.ts](src/shared/osc.ts). Only **`OSC_HIT_PATH`** from [src/shared/protocol.ts](src/shared/protocol.ts) is supported for hits; arguments must match **`oscArgsToHit`** (seven numeric args).
+- **MIDI:** Virtual port via **easymidi** through [src/companion/midiOutput.ts](src/companion/midiOutput.ts). Note on/off timing uses **`hitToMidiMessages`** in [src/companion/midiMessages.ts](src/companion/midiMessages.ts). Env overrides: `TABLE_SYNTH_WS_PORT`, `TABLE_SYNTH_MIDI_CHANNEL`, `TABLE_SYNTH_NOTE_DURATION_MS`, `TABLE_SYNTH_MIDI_PORT_NAME`.
+- **Shared code:** Companion imports from `../shared/` — keep types and parsers **browser-agnostic** (no `window` in shared modules used by the server).

@@ -1,0 +1,13 @@
+---
+description: Matter.js, grid, tilt sensors, OSC protocol, and WebSocket bridge guardrails
+globs: src/App.tsx,src/shared/**/*,src/hooks/**/*
+alwaysApply: false
+---
+
+# App state, physics, and bridge
+
+- **State model:** Table grid, ball simulation, bridge URL, tilt mode, and UI flags are **local React state** in [src/App.tsx](src/App.tsx). Do not introduce global singletons or persistence unless the product asks for them.
+- **Matter.js:** Keep the **engine / world / runner** lifecycle and **collision → cell hit** flow consistent with existing patterns. Bodies and bounds should stay aligned with [src/shared/grid.ts](src/shared/grid.ts) (`getCellAtPosition`, column offset / scrolling).
+- **Grid & music:** Cell enablement, MIDI note mapping, and velocity helpers live in [src/shared/grid.ts](src/shared/grid.ts) and [src/shared/music.ts](src/shared/music.ts). Changing hit rules should stay coherent with **TriggerTracker** in [src/shared/physics.ts](src/shared/physics.ts).
+- **Tilt / device APIs:** [src/hooks/useTiltControls.ts](src/hooks/useTiltControls.ts) handles **DeviceOrientation**, iOS **requestPermission**, calibration, and smoothing. **Remove listeners** on teardown and when switching modes. Real devices need a **secure context** (HTTPS); see [AGENTS.md](AGENTS.md) for local dev TLS.
+- **OSC & protocol:** Hit payloads and OSC argument order are defined in [src/shared/protocol.ts](src/shared/protocol.ts) (`OSC_HIT_PATH`, `HitPayload`, `hitToOscArgs` / `oscArgsToHit`). The companion decodes with [src/shared/osc.ts](src/shared/osc.ts) and [src/companion/midiMessages.ts](src/companion/midiMessages.ts). Changing shapes requires updating **both** client and server and **tests/** (`midiMessages`, `osc`, `physics` as relevant).

@@ -3,13 +3,24 @@ import * as Matter from "matter-js";
 import { Settings, X } from "lucide-react";
 import { useOscClient } from "./hooks/useOscClient";
 import { useTiltControls } from "./hooks/useTiltControls";
-import { createDefaultGrid, getCellAtPosition, GRID_COLS, GRID_ROWS } from "./shared/grid";
+import {
+  createDefaultGrid,
+  getCellAtPosition,
+  GRID_ROWS,
+  headingToColumnOffset,
+  VISIBLE_GRID_COLS,
+  visibleColToGridCol
+} from "./shared/grid";
 import { clamp, midiNoteName, speedToVelocity } from "./shared/music";
 import { normalizeSpeed, TriggerTracker, type TiltVector } from "./shared/physics";
 import { DEFAULT_WS_PORT, type CellAddress, type GridCell, type HitPayload } from "./shared/protocol";
 
 type RecentHit = HitPayload & { time: number };
 type Dimensions = { width: number; height: number };
+type CompassAnchor = {
+  headingCol: number | null;
+  offset: number;
+};
 
 const DEFAULT_BRIDGE_URL = `wss://${window.location.hostname || "localhost"}:${DEFAULT_WS_PORT}`;
 
@@ -42,24 +53,28 @@ function drawTable(
   grid: GridCell[][],
   ball: Matter.Body,
   currentCell: CellAddress | null,
-  recentHit: RecentHit | null
+  recentHit: RecentHit | null,
+  noteOffActive: boolean,
+  columnOffset: number
 ) {
   const { width, height } = dimensions;
   context.clearRect(0, 0, width, height);
   context.fillStyle = "#151b1f";
   context.fillRect(0, 0, width, height);
 
-  const cellWidth = width / GRID_COLS;
+  const cellWidth = width / VISIBLE_GRID_COLS;
   const cellHeight = height / GRID_ROWS;
 
   for (let row = 0; row < GRID_ROWS; row += 1) {
-    for (let col = 0; col < GRID_COLS; col += 1) {
-      const cell = grid[row][col];
-      const x = col * cellWidth;
+    for (let visibleCol = 0; visibleCol < VISIBLE_GRID_COLS; visibleCol += 1) {
+      const gridCol = visibleColToGridCol(visibleCol, columnOffset);
+      const cell = grid[row][gridCol];
+      const x = visibleCol * cellWidth;
       const y = row * cellHeight;
       const activeAlpha = cell.enabled ? 0.18 : 0.05;
-      const isCurrent = currentCell?.row === row && currentCell.col === col;
-      const isRecent = recentHit?.row === row && recentHit.col === col && performance.now() - recentHit.time < 140;
+      const isCurrent = currentCell?.row === row && currentCell.col === gridCol;
+      const isRecent =
+        !noteOffActive && recentHit?.row === row && recentHit.col === gridCol && performance.now() - recentHit.time < 140;
 
       context.fillStyle = isRecent
         ? "rgba(89, 214, 183, 0.36)"
@@ -72,7 +87,13 @@ function drawTable(
       context.lineWidth = 1;
       context.strokeRect(x + 0.5, y + 0.5, cellWidth - 1, cellHeight - 1);
 
-      context.fillStyle = cell.enabled ? "rgba(244, 248, 247, 0.74)" : "rgba(244, 248, 247, 0.25)";
+      context.fillStyle = noteOffActive
+        ? cell.enabled
+          ? "rgba(232, 236, 237, 0.46)"
+          : "rgba(232, 236, 237, 0.18)"
+        : cell.enabled
+          ? "rgba(244, 248, 247, 0.74)"
+          : "rgba(244, 248, 247, 0.25)";
       context.font = `${Math.max(11, Math.min(15, cellWidth * 0.22))}px ui-sans-serif, system-ui`;
       context.textAlign = "center";
       context.textBaseline = "middle";
@@ -93,15 +114,27 @@ function drawTable(
     ball.position.y,
     radius
   );
-  gradient.addColorStop(0, "#ffffff");
-  gradient.addColorStop(0.35, "#9ff0df");
-  gradient.addColorStop(1, "#137d72");
+
+  if (noteOffActive) {
+    gradient.addColorStop(0, "rgba(255, 255, 255, 0.78)");
+    gradient.addColorStop(0.46, "rgba(194, 201, 203, 0.46)");
+    gradient.addColorStop(1, "rgba(83, 91, 95, 0.22)");
+    context.shadowColor = "rgba(240, 245, 245, 0.28)";
+    context.shadowBlur = radius * 1.1;
+  } else {
+    gradient.addColorStop(0, "#ffffff");
+    gradient.addColorStop(0.35, "#9ff0df");
+    gradient.addColorStop(1, "#137d72");
+    context.shadowBlur = 0;
+  }
+
   context.fillStyle = gradient;
   context.beginPath();
   context.arc(ball.position.x, ball.position.y, radius, 0, Math.PI * 2);
   context.fill();
-  context.strokeStyle = "rgba(2, 8, 10, 0.35)";
-  context.lineWidth = 2;
+  context.shadowBlur = 0;
+  context.strokeStyle = noteOffActive ? "rgba(238, 242, 243, 0.48)" : "rgba(2, 8, 10, 0.35)";
+  context.lineWidth = noteOffActive ? 1.5 : 2;
   context.stroke();
 }
 
@@ -111,18 +144,26 @@ export default function App() {
   const [bridgeUrl, setBridgeUrl] = useState(DEFAULT_BRIDGE_URL);
   const [dimensions, setDimensions] = useState<Dimensions>({ width: 320, height: 320 });
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [noteOffActive, setNoteOffActive] = useState(false);
+  const [motionResponse, setMotionResponse] = useState(1);
+  const [compassLocked, setCompassLocked] = useState(false);
+  const [columnOffset, setColumnOffset] = useState(0);
 
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const shellRef = useRef<HTMLDivElement | null>(null);
   const gridRef = useRef(grid);
   const tiltRef = useRef<TiltVector>({ x: 0, y: 0 });
+  const motionResponseRef = useRef(1);
+  const columnOffsetRef = useRef(0);
+  const compassAnchorRef = useRef<CompassAnchor>({ headingCol: null, offset: 0 });
+  const noteOffRef = useRef(false);
   const triggerRef = useRef(new TriggerTracker(180));
   const recentHitRef = useRef<RecentHit | null>(null);
   const selected = getCell(grid, selectedCell);
   const healthUrl = bridgeHealthUrl(bridgeUrl);
 
   const { connect, disconnect, sendHit, state: connectionState, lastError, lastBridgeMessage } = useOscClient(bridgeUrl);
-  const { tilt, mode, setMode, permission, enableSensors, calibrate, resetSimulation } = useTiltControls();
+  const { tilt, heading, mode, setMode, permission, enableSensors, calibrate, resetSimulation } = useTiltControls();
 
   useEffect(() => {
     gridRef.current = grid;
@@ -131,6 +172,54 @@ export default function App() {
   useEffect(() => {
     tiltRef.current = tilt;
   }, [tilt]);
+
+  useEffect(() => {
+    motionResponseRef.current = motionResponse;
+  }, [motionResponse]);
+
+  const setColumnOffsetAndReset = useCallback((offset: number) => {
+    columnOffsetRef.current = offset;
+    setColumnOffset(offset);
+    triggerRef.current.reset();
+  }, []);
+
+  useEffect(() => {
+    if (compassLocked || heading === null) {
+      return;
+    }
+
+    const headingCol = headingToColumnOffset(heading);
+    const anchor = compassAnchorRef.current;
+    if (anchor.headingCol === null) {
+      compassAnchorRef.current = { headingCol, offset: columnOffsetRef.current };
+      return;
+    }
+
+    setColumnOffsetAndReset(visibleColToGridCol(headingCol - anchor.headingCol, anchor.offset));
+  }, [compassLocked, heading, setColumnOffsetAndReset]);
+
+  const toggleCompassLock = useCallback(() => {
+    setCompassLocked((locked) => {
+      const nextLocked = !locked;
+
+      if (!nextLocked) {
+        compassAnchorRef.current = {
+          headingCol: heading === null ? null : headingToColumnOffset(heading),
+          offset: columnOffsetRef.current
+        };
+      }
+
+      return nextLocked;
+    });
+  }, [heading]);
+
+  const setMomentaryNoteOff = useCallback((active: boolean) => {
+    noteOffRef.current = active;
+    setNoteOffActive(active);
+    if (active) {
+      triggerRef.current.reset();
+    }
+  }, []);
 
   useEffect(() => {
     const shell = shellRef.current;
@@ -199,16 +288,22 @@ export default function App() {
       const delta = clamp(time - lastTime, 8, 32);
       lastTime = time;
       const control = tiltRef.current;
-      engine.gravity.x = control.x;
-      engine.gravity.y = control.y;
+      engine.gravity.x = control.x * motionResponseRef.current;
+      engine.gravity.y = control.y * motionResponseRef.current;
       Matter.Engine.update(engine, delta);
 
       const x = clamp(ball.position.x / dimensions.width, 0, 1);
       const y = clamp(ball.position.y / dimensions.height, 0, 1);
-      const cell = getCellAtPosition(x, y);
+      const visibleCell = getCellAtPosition(x, y);
+      const cell = visibleCell
+        ? {
+            row: visibleCell.row,
+            col: visibleColToGridCol(visibleCell.col, columnOffsetRef.current)
+          }
+        : null;
 
       const gridCell = cell ? getCell(gridRef.current, cell) : null;
-      const triggerCell = triggerRef.current.next(gridCell?.enabled ? cell : null, time);
+      const triggerCell = noteOffRef.current ? null : triggerRef.current.next(gridCell?.enabled ? cell : null, time);
       const speed = normalizeSpeed(Math.hypot(ball.velocity.x, ball.velocity.y));
 
       if (triggerCell && gridCell) {
@@ -224,7 +319,16 @@ export default function App() {
         recentHitRef.current = { ...hit, time };
       }
 
-      drawTable(context, dimensions, gridRef.current, ball, cell, recentHitRef.current);
+      drawTable(
+        context,
+        dimensions,
+        gridRef.current,
+        ball,
+        cell,
+        recentHitRef.current,
+        noteOffRef.current,
+        columnOffsetRef.current
+      );
       frame = window.requestAnimationFrame(loop);
     };
 
@@ -240,9 +344,12 @@ export default function App() {
       const canvas = canvasRef.current;
       if (!canvas) return;
       const rect = canvas.getBoundingClientRect();
-      const cell = getCellAtPosition((event.clientX - rect.left) / rect.width, (event.clientY - rect.top) / rect.height);
-      if (cell) {
-        setSelectedCell(cell);
+      const visibleCell = getCellAtPosition((event.clientX - rect.left) / rect.width, (event.clientY - rect.top) / rect.height);
+      if (visibleCell) {
+        setSelectedCell({
+          row: visibleCell.row,
+          col: visibleColToGridCol(visibleCell.col, columnOffsetRef.current)
+        });
       }
     },
     []
@@ -268,6 +375,50 @@ export default function App() {
 
         <div className="table-wrap" ref={shellRef}>
           <canvas ref={canvasRef} className="table-canvas" onPointerDown={handleCanvasPointerDown} />
+        </div>
+
+        <div className="performance-buttons">
+          <button
+            type="button"
+            className={`performance-button${noteOffActive ? " is-active" : ""}`}
+            aria-pressed={noteOffActive}
+            onPointerDown={(event) => {
+              event.currentTarget.setPointerCapture(event.pointerId);
+              setMomentaryNoteOff(true);
+            }}
+            onPointerUp={(event) => {
+              event.currentTarget.releasePointerCapture(event.pointerId);
+              setMomentaryNoteOff(false);
+            }}
+            onPointerCancel={() => setMomentaryNoteOff(false)}
+            onPointerLeave={(event) => {
+              if (event.buttons === 0) {
+                setMomentaryNoteOff(false);
+              }
+            }}
+            onBlur={() => setMomentaryNoteOff(false)}
+            onKeyDown={(event) => {
+              if (event.repeat) return;
+              if (event.key === " " || event.key === "Enter") {
+                setMomentaryNoteOff(true);
+              }
+            }}
+            onKeyUp={(event) => {
+              if (event.key === " " || event.key === "Enter") {
+                setMomentaryNoteOff(false);
+              }
+            }}
+          >
+            Note Off
+          </button>
+          <button
+            type="button"
+            className={`performance-button${compassLocked ? " is-active" : ""}`}
+            aria-pressed={compassLocked}
+            onClick={toggleCompassLock}
+          >
+            Lock
+          </button>
         </div>
       </section>
 
@@ -320,6 +471,27 @@ export default function App() {
                 </button>
               </div>
               <p className="hint">{mode} / {permission}</p>
+              <p className="hint">
+                Compass {heading === null ? "waiting" : `${Math.round(heading)}°`} / Column {columnOffset + 1}
+                {compassLocked ? " / locked" : ""}
+              </p>
+            </div>
+
+            <div className="control-group">
+              <label htmlFor="motion-response">Physics</label>
+              <div className="slider-control">
+                <input
+                  id="motion-response"
+                  type="range"
+                  min="0.2"
+                  max="2.4"
+                  step="0.05"
+                  value={motionResponse}
+                  onChange={(event) => setMotionResponse(Number(event.target.value))}
+                />
+                <output htmlFor="motion-response">{motionResponse.toFixed(2)}x</output>
+              </div>
+              <p className="hint">Tilt response</p>
             </div>
 
             <div className="control-group">
