@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { getCircularCellAtPosition } from "../src/shared/circular";
 import { getCellAtPosition, headingToColumnOffset, visibleColToGridCol } from "../src/shared/grid";
 import { applyCalibration, normalizeSpeed, orientationToTilt, smoothTilt, TriggerTracker } from "../src/shared/physics";
 import { speedToVelocity } from "../src/shared/music";
@@ -21,6 +22,23 @@ describe("physics helpers", () => {
     expect(getCellAtPosition(0.01, 0.01)).toEqual({ row: 0, col: 0 });
     expect(getCellAtPosition(0.999, 0.999)).toEqual({ row: 7, col: 7 });
     expect(getCellAtPosition(-0.1, 0.5)).toBeNull();
+  });
+
+  it("maps circular positions to rings and clockwise sectors", () => {
+    expect(getCircularCellAtPosition(0.5, 0.5)).toBeNull();
+    expect(getCircularCellAtPosition(1, 1)).toBeNull();
+    expect(getCircularCellAtPosition(0.5, 0.36)).toEqual({ row: 0, col: 0 });
+    expect(getCircularCellAtPosition(0.64, 0.5)).toEqual({ row: 0, col: 2 });
+    expect(getCircularCellAtPosition(0.5, 0.64)).toEqual({ row: 0, col: 4 });
+    expect(getCircularCellAtPosition(0.36, 0.5)).toEqual({ row: 0, col: 6 });
+  });
+
+  it("maps circular radial bands to four playable rings", () => {
+    expect(getCircularCellAtPosition(0.5, 0.38)).toBeNull();
+    expect(getCircularCellAtPosition(0.5, 0.35)).toEqual({ row: 0, col: 0 });
+    expect(getCircularCellAtPosition(0.5, 0.275)).toEqual({ row: 1, col: 0 });
+    expect(getCircularCellAtPosition(0.5, 0.175)).toEqual({ row: 2, col: 0 });
+    expect(getCircularCellAtPosition(0.5, 0.075)).toEqual({ row: 3, col: 0 });
   });
 
   it("maps compass heading to the 64-column wrapped viewport", () => {

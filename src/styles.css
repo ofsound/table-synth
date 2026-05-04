@@ -161,6 +161,10 @@ h1 {
   gap: 12px;
 }
 
+.performance-buttons.is-single {
+  grid-template-columns: 1fr;
+}
+
 .performance-button {
   width: 100%;
   min-height: clamp(64px, 12vh, 96px);
@@ -240,6 +244,29 @@ h1 {
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 8px;
+}
+
+.segmented-control {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px;
+  padding: 4px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #11181b;
+}
+
+.segmented-control button {
+  min-height: 38px;
+  border-color: transparent;
+  background: transparent;
+  color: var(--text-muted);
+}
+
+.segmented-control button.is-active {
+  border-color: rgba(89, 214, 183, 0.38);
+  background: #163c3a;
+  color: #f4fbf9;
 }
 
 .slider-control {

@@ -4,6 +4,13 @@ import { Settings, X } from "lucide-react";
 import { useOscClient } from "./hooks/useOscClient";
 import { useTiltControls } from "./hooks/useTiltControls";
 import {
+  CIRCULAR_DEAD_RADIUS,
+  CIRCULAR_RINGS,
+  CIRCULAR_SECTORS,
+  createDefaultCircularGrid,
+  getCircularCellAtPosition
+} from "./shared/circular";
+import {
   createDefaultGrid,
   getCellAtPosition,
   GRID_ROWS,
@@ -17,6 +24,7 @@ import { DEFAULT_WS_PORT, type CellAddress, type GridCell, type HitPayload } fro
 
 type RecentHit = HitPayload & { time: number };
 type Dimensions = { width: number; height: number };
+type SurfaceMode = "square" | "circular";
 type CompassAnchor = {
   headingCol: number | null;
   offset: number;
@@ -47,7 +55,42 @@ function updateCell(grid: GridCell[][], address: CellAddress, patch: Partial<Gri
   );
 }
 
-function drawTable(
+function drawBall(context: CanvasRenderingContext2D, dimensions: Dimensions, ball: Matter.Body, noteOffActive: boolean) {
+  const { width, height } = dimensions;
+  const radius = (ball.circleRadius ?? Math.min(width, height) * 0.045) * 1.04;
+  const gradient = context.createRadialGradient(
+    ball.position.x - radius * 0.3,
+    ball.position.y - radius * 0.35,
+    radius * 0.1,
+    ball.position.x,
+    ball.position.y,
+    radius
+  );
+
+  if (noteOffActive) {
+    gradient.addColorStop(0, "rgba(255, 255, 255, 0.78)");
+    gradient.addColorStop(0.46, "rgba(194, 201, 203, 0.46)");
+    gradient.addColorStop(1, "rgba(83, 91, 95, 0.22)");
+    context.shadowColor = "rgba(240, 245, 245, 0.28)";
+    context.shadowBlur = radius * 1.1;
+  } else {
+    gradient.addColorStop(0, "#ffffff");
+    gradient.addColorStop(0.35, "#9ff0df");
+    gradient.addColorStop(1, "#137d72");
+    context.shadowBlur = 0;
+  }
+
+  context.fillStyle = gradient;
+  context.beginPath();
+  context.arc(ball.position.x, ball.position.y, radius, 0, Math.PI * 2);
+  context.fill();
+  context.shadowBlur = 0;
+  context.strokeStyle = noteOffActive ? "rgba(238, 242, 243, 0.48)" : "rgba(2, 8, 10, 0.35)";
+  context.lineWidth = noteOffActive ? 1.5 : 2;
+  context.stroke();
+}
+
+function drawSquareTable(
   context: CanvasRenderingContext2D,
   dimensions: Dimensions,
   grid: GridCell[][],
@@ -105,42 +148,130 @@ function drawTable(
   context.lineWidth = 4;
   context.strokeRect(2, 2, width - 4, height - 4);
 
-  const radius = (ball.circleRadius ?? Math.min(width, height) * 0.045) * 1.04;
-  const gradient = context.createRadialGradient(
-    ball.position.x - radius * 0.3,
-    ball.position.y - radius * 0.35,
-    radius * 0.1,
-    ball.position.x,
-    ball.position.y,
-    radius
-  );
+  drawBall(context, dimensions, ball, noteOffActive);
+}
 
-  if (noteOffActive) {
-    gradient.addColorStop(0, "rgba(255, 255, 255, 0.78)");
-    gradient.addColorStop(0.46, "rgba(194, 201, 203, 0.46)");
-    gradient.addColorStop(1, "rgba(83, 91, 95, 0.22)");
-    context.shadowColor = "rgba(240, 245, 245, 0.28)";
-    context.shadowBlur = radius * 1.1;
-  } else {
-    gradient.addColorStop(0, "#ffffff");
-    gradient.addColorStop(0.35, "#9ff0df");
-    gradient.addColorStop(1, "#137d72");
-    context.shadowBlur = 0;
+function drawCircularTable(
+  context: CanvasRenderingContext2D,
+  dimensions: Dimensions,
+  grid: GridCell[][],
+  ball: Matter.Body,
+  currentCell: CellAddress | null,
+  recentHit: RecentHit | null,
+  noteOffActive: boolean
+) {
+  const { width, height } = dimensions;
+  const size = Math.min(width, height);
+  const centerX = width / 2;
+  const centerY = height / 2;
+  const outerRadius = size * 0.5 - 3;
+  const deadRadius = outerRadius * CIRCULAR_DEAD_RADIUS;
+  const playableWidth = outerRadius - deadRadius;
+
+  context.clearRect(0, 0, width, height);
+  context.fillStyle = "#151b1f";
+  context.fillRect(0, 0, width, height);
+
+  for (let row = 0; row < CIRCULAR_RINGS; row += 1) {
+    const innerRadius = deadRadius + (playableWidth * row) / CIRCULAR_RINGS;
+    const ringOuterRadius = deadRadius + (playableWidth * (row + 1)) / CIRCULAR_RINGS;
+
+    for (let col = 0; col < CIRCULAR_SECTORS; col += 1) {
+      const cell = grid[row][col];
+      const startAngle = -Math.PI / 2 + (col / CIRCULAR_SECTORS) * Math.PI * 2;
+      const endAngle = -Math.PI / 2 + ((col + 1) / CIRCULAR_SECTORS) * Math.PI * 2;
+      const activeAlpha = cell.enabled ? 0.18 : 0.05;
+      const isCurrent = currentCell?.row === row && currentCell.col === col;
+      const isRecent =
+        !noteOffActive && recentHit?.row === row && recentHit.col === col && performance.now() - recentHit.time < 140;
+
+      context.beginPath();
+      context.arc(centerX, centerY, ringOuterRadius, startAngle, endAngle);
+      context.arc(centerX, centerY, innerRadius, endAngle, startAngle, true);
+      context.closePath();
+      context.fillStyle = isRecent
+        ? "rgba(89, 214, 183, 0.36)"
+        : isCurrent
+          ? "rgba(244, 191, 79, 0.24)"
+          : `rgba(106, 147, 170, ${activeAlpha})`;
+      context.fill();
+      context.strokeStyle = "rgba(232, 238, 240, 0.16)";
+      context.lineWidth = 1;
+      context.stroke();
+
+      const labelAngle = (startAngle + endAngle) / 2;
+      const labelRadius = (innerRadius + ringOuterRadius) / 2;
+      const labelX = centerX + Math.cos(labelAngle) * labelRadius;
+      const labelY = centerY + Math.sin(labelAngle) * labelRadius;
+      context.fillStyle = noteOffActive
+        ? cell.enabled
+          ? "rgba(232, 236, 237, 0.46)"
+          : "rgba(232, 236, 237, 0.18)"
+        : cell.enabled
+          ? "rgba(244, 248, 247, 0.74)"
+          : "rgba(244, 248, 247, 0.25)";
+      context.font = `${Math.max(10, Math.min(14, playableWidth * 0.11))}px ui-sans-serif, system-ui`;
+      context.textAlign = "center";
+      context.textBaseline = "middle";
+      context.fillText(cell.label, labelX, labelY);
+    }
   }
 
-  context.fillStyle = gradient;
   context.beginPath();
-  context.arc(ball.position.x, ball.position.y, radius, 0, Math.PI * 2);
+  context.arc(centerX, centerY, deadRadius, 0, Math.PI * 2);
+  context.fillStyle = "rgba(2, 8, 10, 0.3)";
   context.fill();
-  context.shadowBlur = 0;
-  context.strokeStyle = noteOffActive ? "rgba(238, 242, 243, 0.48)" : "rgba(2, 8, 10, 0.35)";
-  context.lineWidth = noteOffActive ? 1.5 : 2;
+  context.strokeStyle = "rgba(232, 238, 240, 0.22)";
+  context.lineWidth = 1.2;
   context.stroke();
+
+  context.beginPath();
+  context.arc(centerX, centerY, outerRadius, 0, Math.PI * 2);
+  context.strokeStyle = "rgba(244, 248, 247, 0.45)";
+  context.lineWidth = 4;
+  context.stroke();
+
+  drawBall(context, dimensions, ball, noteOffActive);
+}
+
+function createSquareWalls(dimensions: Dimensions, wall: number) {
+  return [
+    Matter.Bodies.rectangle(dimensions.width / 2, -wall / 2, dimensions.width + wall * 2, wall, { isStatic: true }),
+    Matter.Bodies.rectangle(dimensions.width / 2, dimensions.height + wall / 2, dimensions.width + wall * 2, wall, {
+      isStatic: true
+    }),
+    Matter.Bodies.rectangle(-wall / 2, dimensions.height / 2, wall, dimensions.height + wall * 2, { isStatic: true }),
+    Matter.Bodies.rectangle(dimensions.width + wall / 2, dimensions.height / 2, wall, dimensions.height + wall * 2, {
+      isStatic: true
+    })
+  ];
+}
+
+function createCircularWalls(dimensions: Dimensions, wall: number) {
+  const segments = 64;
+  const centerX = dimensions.width / 2;
+  const centerY = dimensions.height / 2;
+  const outerRadius = Math.min(dimensions.width, dimensions.height) * 0.5 - 3;
+  const segmentLength = ((Math.PI * 2 * outerRadius) / segments) * 1.18;
+
+  return Array.from({ length: segments }, (_, index) => {
+    const angle = (index / segments) * Math.PI * 2;
+    const x = centerX + Math.cos(angle) * (outerRadius + wall / 2);
+    const y = centerY + Math.sin(angle) * (outerRadius + wall / 2);
+
+    return Matter.Bodies.rectangle(x, y, segmentLength, wall, {
+      angle: angle + Math.PI / 2,
+      isStatic: true
+    });
+  });
 }
 
 export default function App() {
+  const [surfaceMode, setSurfaceModeState] = useState<SurfaceMode>("square");
   const [grid, setGrid] = useState(() => createDefaultGrid());
+  const [circularGrid, setCircularGrid] = useState(() => createDefaultCircularGrid());
   const [selectedCell, setSelectedCell] = useState<CellAddress>({ row: GRID_ROWS - 1, col: 0 });
+  const [selectedCircularCell, setSelectedCircularCell] = useState<CellAddress>({ row: 0, col: 0 });
   const [bridgeUrl, setBridgeUrl] = useState(DEFAULT_BRIDGE_URL);
   const [dimensions, setDimensions] = useState<Dimensions>({ width: 320, height: 320 });
   const [settingsOpen, setSettingsOpen] = useState(false);
@@ -151,7 +282,9 @@ export default function App() {
 
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const shellRef = useRef<HTMLDivElement | null>(null);
+  const surfaceModeRef = useRef<SurfaceMode>("square");
   const gridRef = useRef(grid);
+  const circularGridRef = useRef(circularGrid);
   const tiltRef = useRef<TiltVector>({ x: 0, y: 0 });
   const motionResponseRef = useRef(1);
   const columnOffsetRef = useRef(0);
@@ -159,15 +292,44 @@ export default function App() {
   const noteOffRef = useRef(false);
   const triggerRef = useRef(new TriggerTracker(180));
   const recentHitRef = useRef<RecentHit | null>(null);
-  const selected = getCell(grid, selectedCell);
+  const selectedAddress = surfaceMode === "square" ? selectedCell : selectedCircularCell;
+  const selectedGrid = surfaceMode === "square" ? grid : circularGrid;
+  const selected = getCell(selectedGrid, selectedAddress);
   const healthUrl = bridgeHealthUrl(bridgeUrl);
 
   const { connect, disconnect, sendHit, state: connectionState, lastError, lastBridgeMessage } = useOscClient(bridgeUrl);
   const { tilt, heading, mode, setMode, permission, enableSensors, calibrate, resetSimulation } = useTiltControls();
 
+  const resetTriggers = useCallback(() => {
+    triggerRef.current.reset();
+    recentHitRef.current = null;
+  }, []);
+
+  const setSurfaceMode = useCallback(
+    (nextMode: SurfaceMode) => {
+      surfaceModeRef.current = nextMode;
+      setSurfaceModeState(nextMode);
+      setNoteOffActive(false);
+      noteOffRef.current = false;
+      resetTriggers();
+      if (nextMode === "circular") {
+        setCompassLocked(false);
+      }
+    },
+    [resetTriggers]
+  );
+
+  useEffect(() => {
+    surfaceModeRef.current = surfaceMode;
+  }, [surfaceMode]);
+
   useEffect(() => {
     gridRef.current = grid;
   }, [grid]);
+
+  useEffect(() => {
+    circularGridRef.current = circularGrid;
+  }, [circularGrid]);
 
   useEffect(() => {
     tiltRef.current = tilt;
@@ -180,11 +342,11 @@ export default function App() {
   const setColumnOffsetAndReset = useCallback((offset: number) => {
     columnOffsetRef.current = offset;
     setColumnOffset(offset);
-    triggerRef.current.reset();
-  }, []);
+    resetTriggers();
+  }, [resetTriggers]);
 
   useEffect(() => {
-    if (compassLocked || heading === null) {
+    if (surfaceMode !== "square" || compassLocked || heading === null) {
       return;
     }
 
@@ -196,9 +358,13 @@ export default function App() {
     }
 
     setColumnOffsetAndReset(visibleColToGridCol(headingCol - anchor.headingCol, anchor.offset));
-  }, [compassLocked, heading, setColumnOffsetAndReset]);
+  }, [compassLocked, heading, setColumnOffsetAndReset, surfaceMode]);
 
   const toggleCompassLock = useCallback(() => {
+    if (surfaceModeRef.current !== "square") {
+      return;
+    }
+
     setCompassLocked((locked) => {
       const nextLocked = !locked;
 
@@ -217,9 +383,9 @@ export default function App() {
     noteOffRef.current = active;
     setNoteOffActive(active);
     if (active) {
-      triggerRef.current.reset();
+      resetTriggers();
     }
-  }, []);
+  }, [resetTriggers]);
 
   useEffect(() => {
     const shell = shellRef.current;
@@ -269,16 +435,7 @@ export default function App() {
       frictionAir: 0.014,
       label: "ball"
     });
-    const walls = [
-      Matter.Bodies.rectangle(dimensions.width / 2, -wall / 2, dimensions.width + wall * 2, wall, { isStatic: true }),
-      Matter.Bodies.rectangle(dimensions.width / 2, dimensions.height + wall / 2, dimensions.width + wall * 2, wall, {
-        isStatic: true
-      }),
-      Matter.Bodies.rectangle(-wall / 2, dimensions.height / 2, wall, dimensions.height + wall * 2, { isStatic: true }),
-      Matter.Bodies.rectangle(dimensions.width + wall / 2, dimensions.height / 2, wall, dimensions.height + wall * 2, {
-        isStatic: true
-      })
-    ];
+    const walls = surfaceMode === "square" ? createSquareWalls(dimensions, wall) : createCircularWalls(dimensions, wall);
 
     Matter.Composite.add(engine.world, [ball, ...walls]);
 
@@ -294,15 +451,19 @@ export default function App() {
 
       const x = clamp(ball.position.x / dimensions.width, 0, 1);
       const y = clamp(ball.position.y / dimensions.height, 0, 1);
-      const visibleCell = getCellAtPosition(x, y);
-      const cell = visibleCell
-        ? {
-            row: visibleCell.row,
-            col: visibleColToGridCol(visibleCell.col, columnOffsetRef.current)
-          }
-        : null;
+      const activeSurface = surfaceModeRef.current;
+      const visibleCell =
+        activeSurface === "square" ? getCellAtPosition(x, y) : getCircularCellAtPosition(x, y);
+      const cell =
+        activeSurface === "square" && visibleCell
+          ? {
+              row: visibleCell.row,
+              col: visibleColToGridCol(visibleCell.col, columnOffsetRef.current)
+            }
+          : visibleCell;
 
-      const gridCell = cell ? getCell(gridRef.current, cell) : null;
+      const activeGrid = activeSurface === "square" ? gridRef.current : circularGridRef.current;
+      const gridCell = cell ? getCell(activeGrid, cell) : null;
       const triggerCell = noteOffRef.current ? null : triggerRef.current.next(gridCell?.enabled ? cell : null, time);
       const speed = normalizeSpeed(Math.hypot(ball.velocity.x, ball.velocity.y));
 
@@ -319,16 +480,20 @@ export default function App() {
         recentHitRef.current = { ...hit, time };
       }
 
-      drawTable(
-        context,
-        dimensions,
-        gridRef.current,
-        ball,
-        cell,
-        recentHitRef.current,
-        noteOffRef.current,
-        columnOffsetRef.current
-      );
+      if (activeSurface === "square") {
+        drawSquareTable(
+          context,
+          dimensions,
+          gridRef.current,
+          ball,
+          cell,
+          recentHitRef.current,
+          noteOffRef.current,
+          columnOffsetRef.current
+        );
+      } else {
+        drawCircularTable(context, dimensions, circularGridRef.current, ball, cell, recentHitRef.current, noteOffRef.current);
+      }
       frame = window.requestAnimationFrame(loop);
     };
 
@@ -337,25 +502,41 @@ export default function App() {
       window.cancelAnimationFrame(frame);
       Matter.Engine.clear(engine);
     };
-  }, [dimensions, sendHit]);
+  }, [dimensions, sendHit, surfaceMode]);
 
   const handleCanvasPointerDown = useCallback(
     (event: React.PointerEvent<HTMLCanvasElement>) => {
       const canvas = canvasRef.current;
       if (!canvas) return;
       const rect = canvas.getBoundingClientRect();
-      const visibleCell = getCellAtPosition((event.clientX - rect.left) / rect.width, (event.clientY - rect.top) / rect.height);
-      if (visibleCell) {
+      const x = (event.clientX - rect.left) / rect.width;
+      const y = (event.clientY - rect.top) / rect.height;
+
+      if (surfaceModeRef.current === "square") {
+        const visibleCell = getCellAtPosition(x, y);
+        if (!visibleCell) return;
         setSelectedCell({
           row: visibleCell.row,
           col: visibleColToGridCol(visibleCell.col, columnOffsetRef.current)
         });
+        return;
+      }
+
+      const circularCell = getCircularCellAtPosition(x, y);
+      if (circularCell) {
+        setSelectedCircularCell(circularCell);
       }
     },
     []
   );
 
-  const selectedLabel = useMemo(() => `${selectedCell.row + 1}.${selectedCell.col + 1}`, [selectedCell]);
+  const selectedLabel = useMemo(
+    () =>
+      surfaceMode === "square"
+        ? `${selectedCell.row + 1}.${selectedCell.col + 1}`
+        : `Ring ${selectedCircularCell.row + 1} / Sector ${selectedCircularCell.col + 1}`,
+    [selectedCell, selectedCircularCell, surfaceMode]
+  );
 
   return (
     <main className="app-shell">
@@ -377,7 +558,7 @@ export default function App() {
           <canvas ref={canvasRef} className="table-canvas" onPointerDown={handleCanvasPointerDown} />
         </div>
 
-        <div className="performance-buttons">
+        <div className={`performance-buttons${surfaceMode === "circular" ? " is-single" : ""}`}>
           <button
             type="button"
             className={`performance-button${noteOffActive ? " is-active" : ""}`}
@@ -411,14 +592,16 @@ export default function App() {
           >
             Note Off
           </button>
-          <button
-            type="button"
-            className={`performance-button${compassLocked ? " is-active" : ""}`}
-            aria-pressed={compassLocked}
-            onClick={toggleCompassLock}
-          >
-            Lock
-          </button>
+          {surfaceMode === "square" ? (
+            <button
+              type="button"
+              className={`performance-button${compassLocked ? " is-active" : ""}`}
+              aria-pressed={compassLocked}
+              onClick={toggleCompassLock}
+            >
+              Lock
+            </button>
+          ) : null}
         </div>
       </section>
 
@@ -453,6 +636,28 @@ export default function App() {
             </div>
 
             <div className="control-group">
+              <label>Surface</label>
+              <div className="segmented-control">
+                <button
+                  type="button"
+                  className={surfaceMode === "square" ? "is-active" : ""}
+                  aria-pressed={surfaceMode === "square"}
+                  onClick={() => setSurfaceMode("square")}
+                >
+                  Square
+                </button>
+                <button
+                  type="button"
+                  className={surfaceMode === "circular" ? "is-active" : ""}
+                  aria-pressed={surfaceMode === "circular"}
+                  onClick={() => setSurfaceMode("circular")}
+                >
+                  Circular
+                </button>
+              </div>
+            </div>
+
+            <div className="control-group">
               <label>Motion</label>
               <div className="button-row">
                 <button type="button" onClick={enableSensors}>
@@ -471,10 +676,12 @@ export default function App() {
                 </button>
               </div>
               <p className="hint">{mode} / {permission}</p>
-              <p className="hint">
-                Compass {heading === null ? "waiting" : `${Math.round(heading)}°`} / Column {columnOffset + 1}
-                {compassLocked ? " / locked" : ""}
-              </p>
+              {surfaceMode === "square" ? (
+                <p className="hint">
+                  Compass {heading === null ? "waiting" : `${Math.round(heading)}°`} / Column {columnOffset + 1}
+                  {compassLocked ? " / locked" : ""}
+                </p>
+              ) : null}
             </div>
 
             <div className="control-group">
@@ -504,7 +711,13 @@ export default function App() {
                   value={selected.note}
                   onChange={(event) => {
                     const note = clamp(Number(event.target.value), 0, 127);
-                    setGrid((current) => updateCell(current, selectedCell, { note, label: midiNoteName(note) }));
+                    if (surfaceMode === "square") {
+                      setGrid((current) => updateCell(current, selectedCell, { note, label: midiNoteName(note) }));
+                    } else {
+                      setCircularGrid((current) =>
+                        updateCell(current, selectedCircularCell, { note, label: midiNoteName(note) })
+                      );
+                    }
                   }}
                 />
                 <span>{selected.label}</span>
@@ -513,7 +726,15 @@ export default function App() {
                 <input
                   type="checkbox"
                   checked={selected.enabled}
-                  onChange={(event) => setGrid((current) => updateCell(current, selectedCell, { enabled: event.target.checked }))}
+                  onChange={(event) => {
+                    if (surfaceMode === "square") {
+                      setGrid((current) => updateCell(current, selectedCell, { enabled: event.target.checked }));
+                    } else {
+                      setCircularGrid((current) =>
+                        updateCell(current, selectedCircularCell, { enabled: event.target.checked })
+                      );
+                    }
+                  }}
                 />
                 Enabled
               </label>
